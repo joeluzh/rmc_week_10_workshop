@@ -1,0 +1,181 @@
+---
+title: "Influenza A H7N9 in China, 2013"
+format: 
+  dashboard:
+    embed-resources: true
+theme: lux
+---
+
+```{r}
+# Load packages 
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, outbreaks, bslib, bsicons, shiny, 
+               rgeoboundaries, plotly, htmltools, reactable)
+
+# view data
+#head(outbreaks::fluH7N9_china_2013)
+
+outbreak_data <- outbreaks::fluH7N9_china_2013
+
+number_of_cases <- outbreak_data %>% 
+  summarise(n()) %>% 
+  unlist() %>% 
+  as.numeric()
+total_cases <- number_of_cases
+
+total_hospitalizations <- as.numeric(sum(!is.na(outbreak_data$date_of_hospitalisation)))
+
+total_deaths <- outbreak_data %>% 
+  filter(outcome == "Death") %>% 
+  count() %>% 
+  unlist() %>% 
+  as.numeric()
+```
+
+# HOME 
+
+## ROW 1 {height=20%}
+
+```{r}
+value_box(
+  title = "Total Cases",
+  value = number_of_cases,
+  showcase = bsicons::bs_icon("virus"),
+  theme = value_box_theme(bg = "#518fd6"))
+```
+
+```{r}
+value_box(
+  title = "Total Hospitalizations",
+  value = total_hospitalizations,
+  showcase = bsicons::bs_icon("hospital"),
+  theme = value_box_theme(bg = "#3869a1")
+)
+```
+
+```{r}
+value_box(
+  title = "Total Deaths",
+  value = total_deaths,
+  showcase = bsicons::bs_icon("file-medical"),
+  theme = value_box_theme(bg = "#82a0c2")
+)
+```
+
+```{r}
+### MAP OF CASES PER PROVINCE
+province_summary <- fluH7N9_china_2013 %>% 
+  group_by(province) %>% 
+  summarise(total_cases = n()) 
+
+china_map <- rgeoboundaries::gb_adm1("china")
+
+# Check the keys to see if join will be successful
+#setdiff(province_summary$province, china_map$shapeName)
+#setdiff(china_map$shapeName, province_summary$province)
+# Some work to be done to harmonize these
+
+china_map <- china_map %>%
+  # Remove the strings Province, Municipality and Autonomous Region 
+  # to allow matching
+  mutate(province = str_trim(
+    str_remove(shapeName, "Province|Municipality|Autonomous Region")
+  ))
+
+# Check if join will work fine
+#setdiff(province_summary$province, china_map$province)
+
+# Fix Guangdong, which based on a quick Google is actually Guangzhou
+china_map <- china_map %>% 
+  mutate(province = if_else(province == "Guangzhou", "Guangdong", province)) 
+  
+# Check again
+#setdiff(province_summary$province, china_map$province)
+
+# Now join
+china_map_joined <- 
+  left_join(china_map, province_summary, by = "province") %>% 
+  # Create tooltip label 
+  mutate(tooltip_label = paste0(province, ": ", total_cases))
+
+china_map_plot <- ggplot(china_map_joined) +
+  geom_sf(aes(fill = total_cases, text = tooltip_label)) + 
+  theme_void() +
+  labs(fill = "Number of Cases", title = "Map of Provinces by Number of Cases") + 
+  theme(legend.position = "none")
+
+china_map_plot_ggplotly <- 
+  ggplotly(china_map_plot, tooltip = "text")
+
+cases_arranged <- province_summary %>% 
+  arrange(desc(total_cases)) %>% 
+  mutate(tooltip_label = paste0(province, 
+                               total_cases, 
+                               sep = ": ")) %>% 
+  ggplot(aes(y = reorder(province, total_cases), 
+             x = total_cases, 
+             text = tooltip_label)) + 
+  geom_col(fill = "#82a0c2") +
+  labs(y = NULL, 
+       x = "Number of Cases",
+       title = "Number of Cases by Province") +
+  theme_minimal() + 
+  theme(legend.position = "none")
+cases_arranged_plotly <- ggplotly(cases_arranged)
+
+```
+
+
+## ROW 2 {height=80%}
+
+### {width=35%}
+```{r}
+cases_arranged_plotly
+```
+
+### {width=65%}
+
+```{r}
+china_map_plot_ggplotly
+```
+
+
+# DOWNLOAD DATA
+
+```{r}
+library(htmltools)
+
+htmltools::browsable(
+  tagList(
+    reactable(outbreak_data, 
+              elementId = "outbreak_data-table", 
+              searchable = T, 
+              filterable = T), 
+    
+tags$button("Download as CSV", 
+            onclick = "Reactable.downloadDataCSV('outbreak_data-table')")
+  )
+)
+
+```
+
+
+
+
+
+
+# ABOUT
+
+This dashboard analyzes data on the 2013 influenza A H7N9 outbreak in China.
+
+Key points:
+
+- There were `r total_cases` total reported cases
+- `r total_hospitalizations` cases were hospitalized  
+- `r total_deaths` deaths occurred
+- The most affected provinces were Zhejiang, Shanghai and Jiangsu
+
+The data is sourced from a Dryad dataset by Kucharski et al (2014) who collated case details from various reports. This dashboard provides an interactive visualization of the outbreak's geographical distribution and key statistics.
+
+Reference: 
+Kucharski, A., Mills, H., Pinsent, A., Fraser, C., Kerkhove, M. V., Donnelly, C. A., & Riley, S. (2014). Distinguishing between reservoir exposure and human-to-human transmission for emerging pathogens using case onset data. *PLOS Currents Outbreaks*, 1. https://doi.org/10.1371/currents.outbreaks.e1473d9bfc99d080ca242139a06c455f
